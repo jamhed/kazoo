@@ -23,6 +23,8 @@
 %%--------------------------------------------------------------------
 -spec start(application:start_type(), any()) -> startapp_ret().
 start(_StartType, _StartArgs) ->
+    kazoo_bindings:bind(<<"maintenance.migrate">>, crossbar_maintenance, migrate),
+    kazoo_bindings:bind(<<"maintenance.refresh_account_db">>, crossbar_util, descendants_count),
     crossbar_sup:start_link().
 
 %%--------------------------------------------------------------------

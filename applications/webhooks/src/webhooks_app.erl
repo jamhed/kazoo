@@ -20,6 +20,7 @@
 -spec start(application:start_type(), any()) -> startapp_ret().
 start(_Type, _Args) ->
     _ = declare_exchanges(),
+    kazoo_bindings:bind(<<"maintenance.refresh.webhooks">>, webhooks_maintenance, reset_webhook_list),
     webhooks_sup:start_link().
 
 %%--------------------------------------------------------------------

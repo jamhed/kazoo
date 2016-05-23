@@ -52,6 +52,7 @@ migrate() ->
 
 -spec migrate(ne_binaries()) -> 'no_return'.
 migrate(Accounts) ->
+    io:format("running crossbar migrations...~n"),
     _ = migrate_accounts_data(Accounts),
 
     CurrentModules =
