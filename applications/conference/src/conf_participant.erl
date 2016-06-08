@@ -14,7 +14,6 @@
 %% API
 -export([start_link/1]).
 -export([relay_amqp/2]).
--export([handle_participants_event/2]).
 -export([handle_conference_error/2]).
 
 -export([consume_call_events/1]).
@@ -30,6 +29,9 @@
 -export([deaf/1, undeaf/1, toggle_deaf/1]).
 -export([hangup/1]).
 -export([dtmf/2]).
+-export([state/1]).
+
+-export([handle_participant_event/2]).
 
 %% gen_server callbacks
 -export([init/1
@@ -45,12 +47,12 @@
 
 -define(SERVER, ?MODULE).
 
--define(RESPONDERS, [{{?MODULE, 'relay_amqp'}
+-define(RESPONDERS(CallId), [{{?MODULE, 'relay_amqp'}
                       ,[{<<"call_event">>, <<"*">>}]
+                     },
+                     {{?MODULE, 'handle_participant_event'}
+                      ,[{<<"conference">>, <<"participant_event.", CallId/binary>>}]
                      }
-                     ,{{?MODULE, 'handle_participants_event'}
-                       ,[{<<"conference">>, <<"participants_event">>}]
-                      }
                      ,{{?MODULE, 'handle_conference_error'}
                        ,[{<<"conference">>, <<"error">>}]
                       }
@@ -89,7 +91,7 @@ start_link(Call) ->
     Bindings = [{'call', [{'callid', CallId}]}
                 ,{'self', []}
                ],
-    gen_listener:start_link(?SERVER, [{'responders', ?RESPONDERS}
+    gen_listener:start_link(?SERVER, [{'responders', ?RESPONDERS(CallId)}
                                       ,{'bindings', Bindings}
                                       ,{'queue_name', ?QUEUE_NAME}
                                       ,{'queue_options', ?QUEUE_OPTIONS}
@@ -119,6 +121,9 @@ join_local(Srv) -> gen_listener:cast(Srv, 'join_local').
 
 -spec join_remote(pid(), kz_json:object()) -> 'ok'.
 join_remote(Srv, JObj) -> gen_listener:cast(Srv, {'join_remote', JObj}).
+
+-spec state(pid()) -> 'ok'.
+state(Srv) -> gen_listener:call(Srv, {'state'}).
 
 -spec mute(pid()) -> 'ok'.
 mute(Srv) -> gen_listener:cast(Srv, 'mute').
@@ -160,16 +165,6 @@ relay_amqp(JObj, Props) ->
             Srv = props:get_value('server', Props),
             dtmf(Srv, Digit)
     end.
-
--spec handle_participants_event(kz_json:object(), kz_proplist()) -> 'ok'.
-handle_participants_event(JObj, Props) ->
-    'true' = kapi_conference:participants_event_v(JObj),
-    _ = [kapps_call_command:relay_event(Pid, JObj)
-         || Pid <- props:get_value('call_event_consumers', Props, []),
-            is_pid(Pid)
-        ],
-    Srv = props:get_value('server', Props),
-    gen_listener:cast(Srv, {'sync_participant', JObj}).
 
 -spec handle_conference_error(kz_json:object(), kz_proplist()) -> 'ok'.
 handle_conference_error(JObj, Props) ->
@@ -224,6 +219,8 @@ handle_call({'get_discovery_event'}, _, #participant{discovery_event=DE}=P) ->
     {'reply', {'ok', DE}, P};
 handle_call({'get_call'}, _, #participant{call=Call}=P) ->
     {'reply', {'ok', Call}, P};
+handle_call({'state'}, _, Participant) ->
+    {reply, Participant, Participant};
 handle_call(_Request, _, P) ->
     {'reply', {'error', 'unimplemented'}, P}.
 
@@ -308,6 +305,8 @@ handle_cast({'join_remote', JObj}, #participant{call=Call
     {'noreply', Participant#participant{remote='true'}};
 handle_cast({'sync_participant', JObj}, #participant{call=Call}=Participant) ->
     {'noreply', sync_participant(JObj, Call, Participant)};
+handle_cast({'participant_event', Action}, #participant{}=Participant) ->
+    {'noreply', participant_event(Action, Participant)};
 handle_cast({'dtmf', Digit}, #participant{last_dtmf = <<"*">>}=Participant) ->
     case Digit of
         <<"1">> -> toggle_mute(self());
@@ -376,6 +375,9 @@ handle_cast(_Cast, Participant) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+handle_info({'event', [_CallId | Props]}, Participant) ->
+    _Action = props:get_value(<<"Action">>, Props),
+    {'noreply', Participant};
 handle_info({'EXIT', Consumer, _R}, #participant{call_event_consumers=Consumers}=P) ->
     lager:debug("call event consumer ~p died: ~p", [Consumer, _R]),
     Cs = [C || C <- Consumers, C =/= Consumer],
@@ -694,3 +696,20 @@ play_entry_tone_media(Tone, Conference) ->
         Media = ?NE_BINARY -> kapps_conference_command:play_command(Media);
         _Else -> kapps_conference_command:play_command(Tone)
     end.
+
+-spec handle_participant_event(kz_json:object(), kz_proplist()) -> 'ok'.
+handle_participant_event(JObj, Props) ->
+    Srv = props:get_value('server', Props),
+    Action = kz_json:get_value(<<"Action">>, JObj),
+    gen_listener:cast(Srv, {'participant_event', Action}),
+    ok.
+
+participant_event(<<"deaf-member">>, Participant) -> Participant#participant{ deaf = 'true' };
+participant_event(<<"undeaf-member">>, Participant) -> Participant#participant{ deaf = 'false' };
+participant_event(<<"mute-member">>, Participant) -> Participant#participant{ muted = 'true' };
+participant_event(<<"unmute-member">>, Participant) -> Participant#participant{ muted = 'false' };
+participant_event(<<"add-member">>, Participant) -> Participant#participant{ in_conference = 'true' };
+participant_event(<<"del-member">>, Participant) -> Participant#participant{ in_conference = 'false' };
+participant_event(Action, Participant) ->
+    lager:info("Action:~p", [Action]),
+    Participant.

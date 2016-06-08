@@ -179,7 +179,9 @@ handle_info({'event', [CallId | Props]}, #state{node=Node}=State) ->
     Action = props:get_value(<<"Action">>, Props),
     _ = case process_participant_event(Action, Props, Node, CallId) of
             'stop' -> 'ok';
-            'continue' -> send_participant_event(Action, CallId, Props);
+            'continue' ->
+                send_participant_event(Action, CallId, Props),
+                publish_participant_event(Action, CallId, Props);
             {'continue', CustomProps} ->
                 send_participant_event(Action, CallId, Props, CustomProps)
         end,
@@ -234,13 +236,9 @@ code_change(_OldVsn, State, _Extra) ->
                                        'stop'.
 process_participant_event(<<"add-member">>, Props, Node, CallId) ->
     _ = ecallmgr_fs_conferences:participant_create(Props, Node, CallId),
-    %% TODO: this can be removed once the kapps conf_participant is refactored
-    _ = publish_new_participant_event(Props, Node),
     'continue';
-process_participant_event(<<"del-member">>, Props, Node, CallId) ->
+process_participant_event(<<"del-member">>, _Props, _Node, CallId) ->
     _ = ecallmgr_fs_conferences:participant_destroy(CallId),
-    %% TODO: this can be removed once the kapps conf_participant is refactored
-    _ = publish_participant_destroy_event(Props, Node),
     'continue';
 process_participant_event(<<"stop-talking">>, _, _, _) -> 'continue';
 process_participant_event(<<"start-talking">>, _, _, _) -> 'continue';
@@ -764,45 +762,26 @@ relay_event(Props) ->
         ],
     'ok'.
 
+log([<<"play-file">>, _, _]) -> skip;
+log([EventName, Application, UUID]) ->
+    lager:debug("relaying conf event ~s(~s) to ~s", [EventName, Application, UUID]).
+
 -spec relay_event(ne_binary(), atom(), kz_proplist()) -> 'ok'.
 relay_event(UUID, Node, Props) ->
     EventName = props:get_first_defined([<<"Event">>, <<"Event-Name">>], Props),
     Application = props:get_first_defined([<<"Application">>, <<"Action">>], Props),
-    lager:debug("relaying conf event ~s(~s) to ~s", [EventName, Application, UUID]),
+    log([EventName, Application, UUID]),
     Payload = {'event', [UUID, {<<"Caller-Unique-ID">>, UUID} | Props]},
     gproc:send({'p', 'l', ?FS_EVENT_REG_MSG(Node, EventName)}, Payload),
     gproc:send({'p', 'l', ?FS_CALL_EVENT_REG_MSG(Node, UUID)}, Payload).
 
-%% TODO: this can be removed once the KAZOO-27 is accepted
--spec publish_new_participant_event(kz_proplist(), atom()) -> 'ok'.
-publish_new_participant_event(Props, Node) ->
-    ConferenceName = props:get_value(<<"Conference-Name">>, Props),
-    Participants = ecallmgr_fs_conferences:participants(ConferenceName),
-    Event = [{<<"Participants">>, ecallmgr_fs_conferences:participants_to_json(Participants)}
-             ,{<<"Focus">>, kz_util:to_binary(Node)}
-             ,{<<"Conference-ID">>, ConferenceName}
-             ,{<<"Instance-ID">>, props:get_value(<<"Conference-Unique-ID">>, Props)}
-             ,{<<"Switch-Hostname">>, props:get_value(<<"FreeSWITCH-Hostname">>, Props, kz_util:to_binary(Node))}
-             ,{<<"Switch-URL">>, ecallmgr_fs_nodes:sip_url(Node)}
-             ,{<<"Switch-External-IP">>, ecallmgr_fs_nodes:sip_external_ip(Node)}
-             | kz_api:default_headers(?APP_NAME, ?APP_VERSION)
-            ],
-    Publisher = fun(P) -> kapi_conference:publish_participants_event(ConferenceName, P) end,
-    kz_amqp_worker:cast(Event, Publisher).
-
-%% TODO: this can be removed once the KAZOO-27 is accepted
--spec publish_participant_destroy_event(kz_proplist(), atom()) -> 'ok'.
-publish_participant_destroy_event(Props, Node) ->
-    ConferenceName = props:get_value(<<"Conference-Name">>, Props),
-    Participants = ecallmgr_fs_conferences:participants(ConferenceName),
-    Event = [{<<"Participants">>, ecallmgr_fs_conferences:participants_to_json(Participants)}
-             ,{<<"Focus">>, kz_util:to_binary(Node)}
-             ,{<<"Conference-ID">>, ConferenceName}
-             ,{<<"Instance-ID">>, props:get_value(<<"Conference-Unique-ID">>, Props)}
-             ,{<<"Switch-Hostname">>, props:get_value(<<"FreeSWITCH-Hostname">>, Props, kz_util:to_binary(Node))}
-             ,{<<"Switch-URL">>, ecallmgr_fs_nodes:sip_url(Node)}
-             ,{<<"Switch-External-IP">>, ecallmgr_fs_nodes:sip_external_ip(Node)}
-             | kz_api:default_headers(?APP_NAME, ?APP_VERSION)
-            ],
-    Publisher = fun(P) -> kapi_conference:publish_participants_event(ConferenceName, P) end,
-    kz_amqp_worker:cast(Event, Publisher).
+publish_participant_event(Action, CallId, Props) ->
+    ConferenceId = props:get_value(<<"Conference-Name">>, Props),
+    Publisher = fun(P) -> kapi_conference:publish_participant_event(ConferenceId, P) end,
+    Ev = [{<<"Event-Category">>, <<"conference">>}
+        ,{<<"Event-Name">>, <<"participant_event.", CallId/binary>>}
+        ,{<<"Conference-ID">>, ConferenceId}
+        ,{<<"Call-ID">>, CallId}
+        ,{<<"Action">>, Action}
+        | kz_api:default_headers(?APP_NAME, ?APP_VERSION)],
+    kz_amqp_worker:cast(Ev, Publisher).
