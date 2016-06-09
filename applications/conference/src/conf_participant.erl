@@ -51,7 +51,7 @@
                       ,[{<<"call_event">>, <<"*">>}]
                      },
                      {{?MODULE, 'handle_participant_event'}
-                      ,[{<<"conference">>, <<"participant_event.", CallId/binary>>}]
+                      ,[{<<"conference">>, <<"participant_event">>}]
                      }
                      ,{{?MODULE, 'handle_conference_error'}
                        ,[{<<"conference">>, <<"error">>}]
@@ -268,10 +268,11 @@ handle_cast({'add_consumer', C}, #participant{call_event_consumers=Cs}=P) ->
 handle_cast({'remove_consumer', C}, #participant{call_event_consumers=Cs}=P) ->
     lager:debug("removing call event consumer ~p", [C]),
     {'noreply', P#participant{call_event_consumers=[C1 || C1 <- Cs, C=/=C1]}};
-handle_cast({'set_conference', Conference}, Participant) ->
+handle_cast({'set_conference', Conference}, Participant=#participant{call=Call}) ->
     ConferenceId = kapps_conference:id(Conference),
+    CallId = kapps_call:call_id(Call),
     lager:debug("received conference data for conference ~s", [ConferenceId]),
-    gen_listener:add_binding(self(), 'conference', [{'restrict_to', [{'conference', ConferenceId}]}]),
+    gen_listener:add_binding(self(), 'conference', [{ 'restrict_to', [{'conference', {ConferenceId,CallId}}] }]),
     {'noreply', Participant#participant{conference=Conference}};
 handle_cast({'set_discovery_event', DE}, #participant{}=Participant) ->
     {'noreply', Participant#participant{discovery_event=DE}};
@@ -710,6 +711,4 @@ participant_event(<<"mute-member">>, Participant) -> Participant#participant{ mu
 participant_event(<<"unmute-member">>, Participant) -> Participant#participant{ muted = 'false' };
 participant_event(<<"add-member">>, Participant) -> Participant#participant{ in_conference = 'true' };
 participant_event(<<"del-member">>, Participant) -> Participant#participant{ in_conference = 'false' };
-participant_event(Action, Participant) ->
-    lager:info("Action:~p", [Action]),
-    Participant.
+participant_event(_Action, Participant) -> Participant.

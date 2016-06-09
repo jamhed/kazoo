@@ -777,11 +777,11 @@ relay_event(UUID, Node, Props) ->
 
 publish_participant_event(Action, CallId, Props) ->
     ConferenceId = props:get_value(<<"Conference-Name">>, Props),
-    Publisher = fun(P) -> kapi_conference:publish_participant_event(ConferenceId, P) end,
     Ev = [{<<"Event-Category">>, <<"conference">>}
-        ,{<<"Event-Name">>, <<"participant_event.", CallId/binary>>}
+        ,{<<"Event-Name">>, <<"participant_event">>}
         ,{<<"Conference-ID">>, ConferenceId}
         ,{<<"Call-ID">>, CallId}
         ,{<<"Action">>, Action}
         | kz_api:default_headers(?APP_NAME, ?APP_VERSION)],
+    Publisher = fun(P) -> kapi_conference:publish_participant_event(ConferenceId, CallId, P) end,
     kz_amqp_worker:cast(Ev, Publisher).

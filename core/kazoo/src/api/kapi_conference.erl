@@ -67,7 +67,7 @@
 -export([publish_participant_volume_in/2, publish_participant_volume_in/3]).
 -export([publish_participant_volume_out/2, publish_participant_volume_out/3]).
 -export([publish_error/2, publish_error/3]).
--export([publish_participant_event/2, publish_participant_event/3]).
+-export([publish_participant_event/3, publish_participant_event/4]).
 -export([publish_command/2, publish_command/3]).
 -export([publish_targeted_command/2, publish_targeted_command/3]).
 -export([publish_config_req/1, publish_config_req/2
@@ -932,6 +932,9 @@ bind_to_q(Q, ['config'|T], Props) ->
     Profile = props:get_value('profile', Props, <<"*">>),
     'ok' = amqp_util:bind_q_to_conference(Q, 'config', Profile),
     bind_to_q(Q, T, Props);
+bind_to_q(Q, [{'conference', {ConfId,CallId}}|T], Props) ->
+    'ok' = amqp_util:bind_q_to_conference(Q, 'event', ConfId, CallId),
+    bind_to_q(Q, T, Props);
 bind_to_q(Q, [{'conference', ConfId}|T], Props) ->
     'ok' = amqp_util:bind_q_to_conference(Q, 'event', ConfId),
     bind_to_q(Q, T, Props);
@@ -1268,13 +1271,13 @@ publish_participant_volume_out(ConferenceId, Req, ContentType) ->
 %% Publish to the conference exchange
 %% @end
 %%--------------------------------------------------------------------
--spec publish_participant_event(ne_binary(), api_terms()) -> 'ok'.
--spec publish_participant_event(ne_binary(), api_terms(), ne_binary()) -> 'ok'.
-publish_participant_event(ConferenceId, JObj) ->
-    publish_participant_event(ConferenceId, JObj, ?DEFAULT_CONTENT_TYPE).
-publish_participant_event(ConferenceId, Event, ContentType) ->
+-spec publish_participant_event(ne_binary(), ne_binary(), api_terms()) -> 'ok'.
+-spec publish_participant_event(ne_binary(), ne_binary(), api_terms(), ne_binary()) -> 'ok'.
+publish_participant_event(ConferenceId, CallId, JObj) ->
+    publish_participant_event(ConferenceId, CallId, JObj, ?DEFAULT_CONTENT_TYPE).
+publish_participant_event(ConferenceId, CallId, Event, ContentType) ->
     {'ok', Payload} = kz_api:prepare_api_payload(Event, ?PARTICIPANT_EVENT_VALUES, fun ?MODULE:participant_event/1),
-    amqp_util:conference_publish(Payload, 'event', ConferenceId, [], ContentType).
+    amqp_util:conference_publish(Payload, 'event', ConferenceId, CallId, [], ContentType).
 
 %%--------------------------------------------------------------------
 %% @doc
