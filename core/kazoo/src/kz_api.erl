@@ -26,6 +26,8 @@
          ,default_headers/4
          ,default_headers/5
 
+         ,with_default_headers/3
+
          ,server_id/1
          ,queue_id/1
          ,msg_id/1
@@ -148,6 +150,9 @@ default_headers_v(JObj) ->
 -spec default_header_v(ne_binary(), kz_proplist()) -> boolean().
 default_header_v(Header, Props) ->
     not kz_util:is_empty(props:get_value(Header, Props)).
+
+-spec with_default_headers(kz_proplist(), ne_binary(), ne_binary()) -> kz_proplist().
+with_default_headers(Headers, App, Vsn) -> Headers ++ default_headers(App, Vsn).
 
 disambiguate_and_publish(ReqJObj, RespJObj, Binding) ->
     Wapi = list_to_binary([<<"kapi_">>, kz_util:to_binary(Binding)]),

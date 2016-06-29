@@ -80,15 +80,14 @@ handle_req(ApiJObj, _Props) ->
         'ok' -> 'ok';
         RespData ->
             RespQ = kz_json:get_value(<<"Server-ID">>, ApiJObj),
-            Resp = [{<<"Data">>, RespData}
-                    ,{<<"Msg-ID">>, kz_json:get_value(<<"Msg-ID">>, ApiJObj)}
-                    | kz_api:default_headers(?APP_NAME, ?APP_VERSION)
-                   ],
+            Resp = kz_api:with_default_headers([{<<"Data">>, RespData}
+                    ,{<<"Msg-ID">>, kz_json:get_value(<<"Msg-ID">>, ApiJObj)}]
+                    ,?APP_NAME, ?APP_VERSION),
             lager:debug("sending reply ~p to ~s",[RespData, Node]),
             kapi_blackhole:publish_get_resp(RespQ, Resp)
     end.
 
-%%--------------------------------------------------------------------
+%%-------------------------------------------------------------------
 %% @public
 %% @doc
 %% @end
