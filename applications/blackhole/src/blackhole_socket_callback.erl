@@ -38,6 +38,11 @@ recv(SessionPid, SessionId, {<<"unsubscribe">>, SubscriptionJObj}, Context) ->
     lager:debug("maybe remove binding for session: ~p. Data: ~p", [SessionId, SubscriptionJObj]),
     unsubscribe(Context, SubscriptionJObj, SessionPid, SessionId);
 
+recv(_SessionPid, _SessionId, {<<"conference_command">>, JObj}, Context) ->
+    lager:debug("received conference_command on socket: ~p with data: ~p", [_SessionId, JObj]),
+    auth_conference_command(Context, JObj),
+    {'ok', Context};
+
 recv(_SessionPid, _SessionId, {<<"send_amqp">>, Data}, Context) ->
     lager:debug("received send_amqp event on socket ~p with data payload", [_SessionId]),
     amqp_send(Context, Data),
@@ -58,10 +63,8 @@ amqp_send(Context, Data) ->
             {Message} = Data,
             {Keys, _} = lists:unzip(Message),
 
-            SendMessage = Message ++ [
-                {<<"Msg-ID">>, kz_util:rand_hex_binary(16)}
-                | kz_api:default_headers(<<"qubicle">>, <<"1.0">>)
-            ],
+            SendMessage = kz_api:append_default_headers(
+                                [{<<"Msg-ID">>, kz_util:rand_hex_binary(16)}] ++ Message, <<"qubicle">>, <<"1.0">>),
 
             {'ok', Payload} = kz_api:build_message(SendMessage, [], Keys),
             amqp_util:basic_publish(<<"qubicle">>, <<"qubicle.recipient">>, Payload, ?DEFAULT_CONTENT_TYPE);
@@ -69,6 +72,24 @@ amqp_send(Context, Data) ->
         'false' ->
             lager:info("ahh ahh ahh, you didn't say the magic word")
     end.
+
+-spec auth_conference_command(bh_context:context(), kz_json:object()) -> 'ok'.
+auth_conference_command(Context, Data) ->
+    case blackhole_util:is_authorized(Context) of
+        'true' -> conference_command(Context, Data);
+        'false' -> lager:info("unauthorized conference command")
+    end.
+
+-spec conference_command(bh_context:context(), kz_json:object()) -> 'ok'.
+conference_command(Context, JObj) ->
+    do_conference_command(kz_json:get_value(<<"Command">>, JObj), Context, JObj).
+
+do_conference_command(<<"mute">>, Context, JObj) ->
+    _ConferenceId = kz_json:get_value(<<"Conference-ID">>, JObj),
+    _ParticipantId = kz_json:get_value(<<"Participnat-ID">>, JObj),
+    lager:error("conference action context:~p jobj:~p", [Context, JObj]);
+do_conference_command(_Command, _Context, _JObj) -> skip.
+
 
 %%--------------------------------------------------------------------
 %% @public
