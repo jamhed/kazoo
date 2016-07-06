@@ -316,15 +316,8 @@ maybe_create_conference(Context) ->
                     create_conference(Context);
                 {'true', Number} ->
                     lager:error("number ~s is already used", [Number]),
-                    cb_context:add_validation_error(
-                      [<<"numbers">>]
-                                                   ,<<"unique">>
-                                                   ,kz_json:from_list([
-                                                                       {<<"message">>, <<"Number already in use">>}
-                                                                      ,{<<"cause">>, Number}
-                                                                      ])
-                                                   ,Context
-                     )
+                    Error = kz_json:from_list([{<<"message">>, <<"Number already in use">>},{<<"cause">>, Number}]),
+                    cb_context:add_validation_error([<<"numbers">>],<<"unique">>,Error, Context)
             end
     end.
 
